@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { config } from '@/config/config';
 import { handleStripeWebhook } from '@/services/payment.service';
+import { applyRateLimit, getWebhookLimiter } from '@/lib/rate-limit';
 
 /**
  * POST /api/webhooks/stripe — Handle Stripe webhook events
@@ -20,6 +21,11 @@ function getStripe(): Stripe {
 
 export async function POST(req: NextRequest) {
     try {
+        // Rate limit: 100 req/min per IP
+        const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+        const limited = await applyRateLimit(ip, getWebhookLimiter());
+        if (limited) return limited;
+
         const body = await req.text();
         const signature = req.headers.get('stripe-signature');
 

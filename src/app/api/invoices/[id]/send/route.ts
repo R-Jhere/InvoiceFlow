@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { invoiceService } from '@/services/invoice.service';
 import { sendInvoiceSchema } from '@/validators/invoice.schema';
+import { applyRateLimit, getStrictLimiter } from '@/lib/rate-limit';
 
 /**
  * POST /api/invoices/[id]/send — Send invoice (generate payment link + email client)
@@ -14,6 +15,11 @@ export async function POST(
 ) {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 5 req/min (triggers external API calls)
+        const limited = await applyRateLimit(session.user.id, getStrictLimiter());
+        if (limited) return limited;
+
         const { id } = await params;
         const body = await req.json();
         const data = sendInvoiceSchema.parse(body);

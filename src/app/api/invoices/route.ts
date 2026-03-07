@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from '@/lib/api-response';
 import { invoiceService } from '@/services/invoice.service';
 import { createInvoiceSchema } from '@/validators/invoice.schema';
 import { InvoiceStatus } from '@prisma/client';
+import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
 
 /**
  * GET /api/invoices — List invoices for the authenticated user
@@ -33,6 +34,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 20 req/min
+        const limited = await applyRateLimit(session.user.id, getStandardLimiter());
+        if (limited) return limited;
+
         const body = await req.json();
         const data = createInvoiceSchema.parse(body);
 

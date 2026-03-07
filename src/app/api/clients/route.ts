@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { clientService } from '@/services/client.service';
 import { createClientSchema } from '@/validators/client.schema';
+import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
 
 /**
  * GET /api/clients — List clients for authenticated user
@@ -22,6 +23,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 20 req/min
+        const limited = await applyRateLimit(session.user.id, getStandardLimiter());
+        if (limited) return limited;
+
         const body = await req.json();
         const data = createClientSchema.parse(body);
 

@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { reminderService } from '@/services/reminder.service';
 import { sendReminderSchema } from '@/validators/reminder.schema';
+import { applyRateLimit, getStrictLimiter } from '@/lib/rate-limit';
 
 
 /**
@@ -15,6 +16,11 @@ export async function POST(
 ) {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 5 req/min (triggers external email/WhatsApp calls)
+        const limited = await applyRateLimit(session.user.id, getStrictLimiter());
+        if (limited) return limited;
+
         const { id } = await params;
         const body = await req.json();
         const data = sendReminderSchema.parse(body);

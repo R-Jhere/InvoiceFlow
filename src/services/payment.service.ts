@@ -171,17 +171,19 @@ export class PaymentService {
      * Mark an invoice as paid manually (off-platform payment).
      */
     async markAsPaid(userId: string, invoiceId: string, data: MarkAsPaidInput) {
-        // We use the raw Prisma client here temporarily to bypass the wrapper if needed,
-        // but it's better to use the repository. We'll verify auth via finding it first.
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) throw new NotFoundError('Invoice');
         if (invoice.userId !== userId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
         if (invoice.status === InvoiceStatus.PAID) throw new AppError('Invoice is already paid', 400, 'INVALID_STATE');
 
+        // Use a deterministic providerPaymentId so the existing idempotency
+        // check in processPaymentSuccess catches concurrent mark-paid requests.
+        const manualPaymentId = `manual-${invoiceId}`;
+
         await this.processPaymentSuccess(
             invoiceId,
             PaymentProvider.MANUAL,
-            null,
+            manualPaymentId,
             data.amount ? Number(data.amount) : Number(invoice.total),
             data.currency || invoice.currency!,
             data.paidAt ? new Date(data.paidAt) : new Date(),

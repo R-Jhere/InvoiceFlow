@@ -68,8 +68,15 @@ export const config = {
     get app() {
         return {
             url: optionalEnv('APP_URL', 'http://localhost:3000'),
-            cronSecret: optionalEnv('CRON_SECRET'),
+            cronSecret: requireEnv('CRON_SECRET'),
             isDev: process.env.NODE_ENV !== 'production',
+        };
+    },
+
+    get upstash() {
+        return {
+            redisUrl: requireEnv('UPSTASH_REDIS_REST_URL'),
+            redisToken: requireEnv('UPSTASH_REDIS_REST_TOKEN'),
         };
     },
 };
