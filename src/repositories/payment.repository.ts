@@ -10,6 +10,14 @@ export class PaymentRepository {
         return prisma.payment.create({ data });
     }
 
+    async findById(id: string) {
+        return prisma.payment.findUnique({ where: { id } });
+    }
+
+    async findMany(args?: Prisma.PaymentFindManyArgs) {
+        return prisma.payment.findMany(args);
+    }
+
     async findByInvoiceId(invoiceId: string) {
         return prisma.payment.findMany({
             where: { invoiceId },
@@ -21,6 +29,14 @@ export class PaymentRepository {
         return prisma.payment.findFirst({
             where: { providerPaymentId },
         });
+    }
+
+    async update(id: string, data: Prisma.PaymentUpdateInput) {
+        return prisma.payment.update({ where: { id }, data });
+    }
+
+    async delete(id: string) {
+        return prisma.payment.delete({ where: { id } });
     }
 }
 

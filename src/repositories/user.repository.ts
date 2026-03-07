@@ -17,12 +17,20 @@ export class UserRepository {
         return prisma.user.findUnique({ where: { email } });
     }
 
+    async findMany(args?: Prisma.UserFindManyArgs) {
+        return prisma.user.findMany(args);
+    }
+
     async create(data: Prisma.UserCreateInput) {
         return prisma.user.create({ data });
     }
 
     async update(id: string, data: Prisma.UserUpdateInput) {
         return prisma.user.update({ where: { id }, data });
+    }
+
+    async delete(id: string) {
+        return prisma.user.delete({ where: { id } });
     }
 
     /** Count invoices created by user in the current calendar month */

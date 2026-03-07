@@ -25,6 +25,41 @@ export class ReminderService {
     ) { }
 
     /**
+     * List all reminders for a given invoice (with ownership check).
+     */
+    async getRemindersForInvoice(userId: string, invoiceId: string) {
+        const invoice = await this.invoiceRepo.findById(invoiceId);
+        if (!invoice) throw new NotFoundError('Invoice');
+        if (invoice.userId !== userId) throw new ForbiddenError();
+        return this.reminderRepo.findByInvoiceId(invoiceId);
+    }
+
+    /**
+     * Schedule a reminder for future delivery.
+     * Creates a PENDING record that the cron job or a queue worker can pick up.
+     */
+    async scheduleReminder(
+        userId: string,
+        invoiceId: string,
+        channel: 'EMAIL' | 'WHATSAPP',
+        scheduledAt: Date,
+    ) {
+        const invoice = await this.invoiceRepo.findById(invoiceId);
+        if (!invoice) throw new NotFoundError('Invoice');
+        if (invoice.userId !== userId) throw new ForbiddenError();
+        if (invoice.status === InvoiceStatus.PAID) {
+            throw new ForbiddenError('Cannot schedule reminders for paid invoices');
+        }
+
+        return this.reminderRepo.create({
+            invoiceId,
+            channel,
+            scheduledAt,
+            status: ReminderStatus.PENDING,
+        });
+    }
+
+    /**
      * Manual "Send Reminder Now" from invoice detail page.
      */
     async sendReminderNow(

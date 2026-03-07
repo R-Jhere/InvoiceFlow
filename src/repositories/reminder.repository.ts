@@ -10,6 +10,14 @@ export class ReminderRepository {
         return prisma.reminder.create({ data });
     }
 
+    async findById(id: string) {
+        return prisma.reminder.findUnique({ where: { id } });
+    }
+
+    async findMany(args?: Prisma.ReminderFindManyArgs) {
+        return prisma.reminder.findMany(args);
+    }
+
     async findByInvoiceId(invoiceId: string) {
         return prisma.reminder.findMany({
             where: { invoiceId },
@@ -19,6 +27,10 @@ export class ReminderRepository {
 
     async update(id: string, data: Prisma.ReminderUpdateInput) {
         return prisma.reminder.update({ where: { id }, data });
+    }
+
+    async delete(id: string) {
+        return prisma.reminder.delete({ where: { id } });
     }
 
     /** Count total successful reminders sent for an invoice */

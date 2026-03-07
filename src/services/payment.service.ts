@@ -1,200 +1,240 @@
-import Stripe from 'stripe';
-import Razorpay from 'razorpay';
-import { config } from '@/config/config';
 import { paymentRepository, PaymentRepository } from '@/repositories/payment.repository';
 import { invoiceRepository, InvoiceRepository } from '@/repositories/invoice.repository';
-import { emailService, EmailService } from './email.service';
-import { NotFoundError } from '@/lib/errors';
+import { NotFoundError, AppError } from '@/lib/errors';
+import { PaymentProvider, InvoiceStatus } from '@prisma/client';
+import type { MarkAsPaidInput } from '@/validators/payment.schema';
+import Stripe from 'stripe';
+import Razorpay from 'razorpay';
+
+let stripe: Stripe;
+export const getStripeClient = () => {
+    if (!stripe) {
+        stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+            apiVersion: '2025-02-24.acacia' as any,
+        });
+    }
+    return stripe;
+};
+
+let razorpay: Razorpay;
+export const getRazorpayClient = () => {
+    if (!razorpay) {
+        razorpay = new Razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID!,
+            key_secret: process.env.RAZORPAY_KEY_SECRET!,
+        });
+    }
+    return razorpay;
+};
 
 /**
  * Payment Service
- *
- * Handles payment link generation (Stripe/Razorpay),
- * webhook processing, and manual mark-as-paid.
  */
 
-let _stripe: Stripe | null = null;
-function getStripe(): Stripe {
-    if (!_stripe) _stripe = new Stripe(config.stripe.secretKey, {
-        apiVersion: '2025-02-24.acacia' as Stripe.LatestApiVersion,
-    });
-    return _stripe;
-}
-
-let _razorpay: InstanceType<typeof Razorpay> | null = null;
-function getRazorpay(): InstanceType<typeof Razorpay> {
-    if (!_razorpay) _razorpay = new Razorpay({
-        key_id: config.razorpay.keyId,
-        key_secret: config.razorpay.keySecret,
-    });
-    return _razorpay;
+interface CreatePaymentLinkParams {
+    amount: number;
+    currency: string;
+    invoiceNumber: string;
+    description: string;
 }
 
 export class PaymentService {
     constructor(
         private readonly paymentRepo: PaymentRepository,
         private readonly invoiceRepo: InvoiceRepository,
-        private readonly email: EmailService,
     ) { }
 
     /**
-     * Generate a payment link for an invoice.
+     * Retrieve all payments for a given invoice.
+     */
+    async getPaymentsByInvoice(invoiceId: string) {
+        return this.paymentRepo.findByInvoiceId(invoiceId);
+    }
+
+    /**
+     * Retrieve a single payment record by ID.
+     */
+    async getPaymentById(id: string) {
+        const payment = await this.paymentRepo.findById(id);
+        if (!payment) throw new NotFoundError('Payment');
+        return payment;
+    }
+
+    /**
+     * Generate a payment link from Stripe or Razorpay.
      */
     async createPaymentLink(
         invoiceId: string,
-        provider: 'STRIPE' | 'RAZORPAY',
-        params: { amount: number; currency: string; invoiceNumber: string; description: string },
+        provider: PaymentProvider,
+        params: CreatePaymentLinkParams,
     ): Promise<string> {
-        if (provider === 'STRIPE') {
-            return this.createStripePaymentLink(params);
-        }
-        return this.createRazorpayPaymentLink(params);
-    }
-
-    private async createStripePaymentLink(params: {
-        amount: number;
-        currency: string;
-        invoiceNumber: string;
-        description: string;
-    }): Promise<string> {
-        const session = await getStripe().checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: params.currency.toLowerCase(),
-                        product_data: {
-                            name: `Invoice ${params.invoiceNumber}`,
-                            description: params.description,
+        if (provider === PaymentProvider.STRIPE) {
+            const stripe = getStripeClient();
+            try {
+                const session = await stripe.checkout.sessions.create({
+                    payment_method_types: ['card'],
+                    line_items: [
+                        {
+                            price_data: {
+                                currency: params.currency.toLowerCase(),
+                                product_data: {
+                                    name: `Invoice ${params.invoiceNumber}`,
+                                    description: params.description,
+                                },
+                                unit_amount: Math.round(params.amount * 100), // Stripe expects cents
+                            },
+                            quantity: 1,
                         },
-                        unit_amount: Math.round(params.amount * 100), // Stripe uses cents
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: `${config.app.url}/invoices?payment=success`,
-            cancel_url: `${config.app.url}/invoices?payment=cancelled`,
-            metadata: { invoiceNumber: params.invoiceNumber },
-        });
+                    ],
+                    mode: 'payment',
+                    success_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/success`,
+                    cancel_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/pay`,
+                    client_reference_id: invoiceId, // Used in webhook
+                });
 
-        return session.url || '';
-    }
+                if (!session.url) throw new AppError('Failed to generate Stripe payment link', 500, 'STRIPE_ERROR');
+                return session.url;
+            } catch (error) {
+                console.error('Stripe error:', error);
+                throw new AppError('Failed to generate Stripe payment link', 500, 'STRIPE_ERROR');
+            }
+        }
 
-    private async createRazorpayPaymentLink(params: {
-        amount: number;
-        currency: string;
-        invoiceNumber: string;
-        description: string;
-    }): Promise<string> {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const link = await (getRazorpay().paymentLink as any).create({
-            amount: Math.round(params.amount * 100), // Razorpay uses paise
-            currency: params.currency.toUpperCase(),
-            description: `Invoice ${params.invoiceNumber} — ${params.description}`,
-            reference_id: params.invoiceNumber,
-            callback_url: `${config.app.url}/invoices?payment=success`,
-            callback_method: 'get',
-        });
+        if (provider === PaymentProvider.RAZORPAY) {
+            const razorpay = getRazorpayClient();
+            try {
+                const pLink: any = await razorpay.paymentLink.create({
+                    amount: Math.round(params.amount * 100), // Razorpay expects paise
+                    currency: params.currency.toUpperCase(),
+                    accept_partial: false,
+                    description: `Invoice ${params.invoiceNumber}`,
+                    reference_id: invoiceId, // Used in webhook
+                    callback_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/success`,
+                    callback_method: 'get',
+                } as any); // Cast as any because razorpay types are sometimes conflicting
 
-        return link.short_url;
-    }
+                if (!pLink.short_url) throw new AppError('Failed to generate Razorpay payment link', 500, 'RAZORPAY_ERROR');
+                return pLink.short_url;
+            } catch (error) {
+                console.error('Razorpay error:', error);
+                throw new AppError('Failed to generate Razorpay payment link', 500, 'RAZORPAY_ERROR');
+            }
+        }
 
-    /**
-     * Handle Stripe webhook (checkout.session.completed).
-     */
-    async handleStripeWebhook(event: Stripe.Event) {
-        if (event.type !== 'checkout.session.completed') return;
-
-        const session = event.data.object as Stripe.Checkout.Session;
-        const invoiceNumber = session.metadata?.invoiceNumber;
-        if (!invoiceNumber) return;
-
-        // Idempotency: check if already processed
-        const existing = await this.paymentRepo.findByProviderPaymentId(session.id);
-        if (existing) return;
-
-        // Find the invoice by number
-        const invoices = await this.invoiceRepo.findByUserId('', undefined);
-        const invoice = invoices.find((i: { invoiceNumber: string }) => i.invoiceNumber === invoiceNumber);
-        if (!invoice) return;
-
-        const now = new Date();
-
-        await this.paymentRepo.create({
-            invoiceId: invoice.id,
-            provider: 'STRIPE',
-            providerPaymentId: session.id,
-            amount: Number(invoice.total),
-            currency: invoice.currency,
-            paidAt: now,
-        });
-
-        await this.invoiceRepo.update(invoice.id, {
-            status: 'PAID',
-            paidAt: now,
-        });
+        throw new AppError('Invalid payment provider', 400, 'INVALID_INPUT');
     }
 
     /**
-     * Handle Razorpay webhook (payment_link.paid).
+     * Handle incoming webhooks from Stripe or Razorpay.
      */
-    async handleRazorpayWebhook(payload: Record<string, unknown>) {
-        const event = payload as { event?: string; payload?: { payment_link?: { entity?: { id?: string; reference_id?: string; amount?: number } } } };
-        if (event.event !== 'payment_link.paid') return;
+    async handleWebhook(provider: PaymentProvider, payload: any) {
+        if (provider === PaymentProvider.STRIPE) {
+            // Ensure this is a successful checkout session
+            if (payload.type !== 'checkout.session.completed') return;
 
-        const entity = event.payload?.payment_link?.entity;
-        if (!entity?.id || !entity?.reference_id) return;
+            const session = payload.data.object;
+            const invoiceId = session.client_reference_id;
+            const providerPaymentId = session.payment_intent as string;
 
-        // Idempotency
-        const existing = await this.paymentRepo.findByProviderPaymentId(entity.id);
-        if (existing) return;
+            if (!invoiceId) return; // Ignore if missing our reference
 
-        const invoices = await this.invoiceRepo.findByUserId('', undefined);
-        const invoice = invoices.find((i: { invoiceNumber: string }) => i.invoiceNumber === entity.reference_id);
-        if (!invoice) return;
+            await this.processPaymentSuccess(
+                invoiceId,
+                PaymentProvider.STRIPE,
+                providerPaymentId as string,
+                Number(session.amount_total!) / 100, // Convert back from cents
+                session.currency!.toUpperCase(),
+            );
+        }
 
-        const now = new Date();
+        if (provider === PaymentProvider.RAZORPAY) {
+            // Ensure this is a successful payment
+            if (payload.event !== 'payment_link.paid') return;
 
-        await this.paymentRepo.create({
-            invoiceId: invoice.id,
-            provider: 'RAZORPAY',
-            providerPaymentId: entity.id,
-            amount: Number(invoice.total),
-            currency: invoice.currency,
-            paidAt: now,
-        });
+            const link = payload.payload.payment_link.entity;
+            const invoiceId = link.reference_id;
+            const providerPaymentId = payload.payload.payment.entity.id;
 
-        await this.invoiceRepo.update(invoice.id, {
-            status: 'PAID',
-            paidAt: now,
-        });
+            if (!invoiceId) return;
+
+            await this.processPaymentSuccess(
+                invoiceId,
+                PaymentProvider.RAZORPAY,
+                providerPaymentId,
+                Number(link.amount_paid) / 100, // Convert back from paise
+                link.currency.toUpperCase(),
+            );
+        }
     }
 
     /**
-     * Manually mark an invoice as paid.
+     * Mark an invoice as paid manually (off-platform payment).
      */
-    async markAsPaid(invoiceId: string, userId: string, data?: { amount?: number; currency?: string; paidAt?: string }) {
+    async markAsPaid(userId: string, invoiceId: string, data: MarkAsPaidInput) {
+        // We use the raw Prisma client here temporarily to bypass the wrapper if needed,
+        // but it's better to use the repository. We'll verify auth via finding it first.
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) throw new NotFoundError('Invoice');
-        if (invoice.userId !== userId) throw new NotFoundError('Invoice');
-        if (invoice.status === 'PAID') return invoice;
+        if (invoice.userId !== userId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+        if (invoice.status === InvoiceStatus.PAID) throw new AppError('Invoice is already paid', 400, 'INVALID_STATE');
 
-        const now = new Date();
+        await this.processPaymentSuccess(
+            invoiceId,
+            PaymentProvider.MANUAL,
+            null,
+            data.amount ? Number(data.amount) : Number(invoice.total),
+            data.currency || invoice.currency!,
+            data.paidAt ? new Date(data.paidAt) : new Date(),
+        );
 
+        return this.invoiceRepo.findById(invoiceId);
+    }
+
+    /**
+     * Internal: Update invoice status and create payment record.
+     */
+    private async processPaymentSuccess(
+        invoiceId: string,
+        provider: PaymentProvider,
+        providerPaymentId: string | null,
+        amount: number,
+        currency: string,
+        paidAt: Date = new Date(),
+    ) {
+        // Check if payment already recorded (idempotency)
+        if (providerPaymentId) {
+            const existing = await this.paymentRepo.findByProviderPaymentId(providerPaymentId);
+            if (existing) return; // Already processed
+        }
+
+        const invoice = await this.invoiceRepo.findById(invoiceId);
+        if (!invoice) return;
+
+        // 1. Create payment record
         await this.paymentRepo.create({
-            invoiceId: invoice.id,
-            provider: 'MANUAL',
-            amount: data?.amount ?? Number(invoice.total),
-            currency: data?.currency ?? invoice.currency,
-            paidAt: data?.paidAt ? new Date(data.paidAt) : now,
+            invoiceId,
+            provider,
+            providerPaymentId,
+            amount: amount as any,
+            currency,
+            paidAt,
         });
 
-        return this.invoiceRepo.update(invoice.id, {
-            status: 'PAID',
-            paidAt: data?.paidAt ? new Date(data.paidAt) : now,
+        // 2. Update invoice status
+        await this.invoiceRepo.update(invoiceId, {
+            status: InvoiceStatus.PAID,
+            paidAt,
+            // If they pay immediately, no more reminders should go out
+            reminderEnabled: false,
         });
     }
 }
 
-export const paymentService = new PaymentService(paymentRepository, invoiceRepository, emailService);
+export const paymentService = new PaymentService(
+    paymentRepository,
+    invoiceRepository,
+);
+
+// Re-export webhooks handlers for clean API paths
+export const handleStripeWebhook = (event: any) => paymentService.handleWebhook(PaymentProvider.STRIPE, event);
+export const handleRazorpayWebhook = (payload: any) => paymentService.handleWebhook(PaymentProvider.RAZORPAY, payload);

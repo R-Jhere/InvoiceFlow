@@ -18,7 +18,7 @@ export async function POST(
         const body = await req.json();
         const data = markAsPaidSchema.parse(body);
 
-        const invoice = await paymentService.markAsPaid(id, session.user.id, data);
+        const invoice = await paymentService.markAsPaid(session.user.id, id, data);
         return successResponse(invoice);
     } catch (error) {
         return errorResponse(error);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { config } from '@/config/config';
-import { paymentService } from '@/services/payment.service';
+import { handleRazorpayWebhook } from '@/services/payment.service';
 
 /**
  * POST /api/webhooks/razorpay — Handle Razorpay webhook events
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
         }
 
         const payload = JSON.parse(body);
-        await paymentService.handleRazorpayWebhook(payload);
+        await handleRazorpayWebhook(payload);
 
         return NextResponse.json({ received: true });
     } catch (error) {

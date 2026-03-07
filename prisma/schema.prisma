@@ -1,5 +1,5 @@
 // ─── InvoiceFlow — Prisma Schema ────────────────────
-// 5 models, 5 enums — matches the design document exactly
+// 5 models, 5 enums — restored missing vital fields for SaaS functionality
 
 generator client {
   provider = "prisma-client-js"
@@ -23,6 +23,12 @@ enum InvoiceStatus {
   OVERDUE
 }
 
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+  MANUAL
+}
+
 enum ReminderChannel {
   EMAIL
   WHATSAPP
@@ -32,12 +38,6 @@ enum ReminderStatus {
   PENDING
   SENT
   FAILED
-}
-
-enum PaymentProvider {
-  STRIPE
-  RAZORPAY
-  MANUAL
 }
 
 // ─── Models ─────────────────────────────────────────
@@ -94,8 +94,8 @@ model Invoice {
   paymentLink        String?
   paymentProvider    PaymentProvider?
   reminderEnabled    Boolean         @default(true)
-  lastReminderSentAt DateTime?
   paidAt             DateTime?
+  lastReminderSentAt DateTime?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
@@ -106,9 +106,27 @@ model Invoice {
 
   @@unique([userId, invoiceNumber])
   @@index([userId])
+  @@index([clientId])
   @@index([status])
   @@index([dueDate])
   @@map("invoices")
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  invoiceId         String
+  provider          PaymentProvider
+  providerPaymentId String?
+  amount            Decimal         @db.Decimal(12, 2)
+  currency          String          @default("USD")
+  paidAt            DateTime
+  createdAt         DateTime        @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([providerPaymentId])
+  @@map("payments")
 }
 
 model Reminder {
@@ -126,21 +144,4 @@ model Reminder {
   @@index([invoiceId])
   @@index([status])
   @@map("reminders")
-}
-
-model Payment {
-  id                String          @id @default(uuid())
-  invoiceId         String
-  provider          PaymentProvider
-  providerPaymentId String?
-  amount            Decimal         @db.Decimal(12, 2)
-  currency          String
-  paidAt            DateTime
-  createdAt         DateTime        @default(now())
-
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-
-  @@index([invoiceId])
-  @@index([providerPaymentId])
-  @@map("payments")
 }

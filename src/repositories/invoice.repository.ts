@@ -16,6 +16,10 @@ export class InvoiceRepository {
         });
     }
 
+    async findMany(args?: Prisma.InvoiceFindManyArgs) {
+        return prisma.invoice.findMany(args);
+    }
+
     async findByUserId(userId: string, status?: InvoiceStatus) {
         return prisma.invoice.findMany({
             where: { userId, ...(status ? { status } : {}) },

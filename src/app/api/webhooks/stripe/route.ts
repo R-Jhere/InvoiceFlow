@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { config } from '@/config/config';
-import { paymentService } from '@/services/payment.service';
+import { handleStripeWebhook } from '@/services/payment.service';
 
 /**
  * POST /api/webhooks/stripe — Handle Stripe webhook events
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
             config.stripe.webhookSecret,
         );
 
-        await paymentService.handleStripeWebhook(event);
+        await handleStripeWebhook(event);
 
         return NextResponse.json({ received: true });
     } catch (error) {

@@ -10,6 +10,10 @@ export class ClientRepository {
         return prisma.client.findUnique({ where: { id } });
     }
 
+    async findMany(args?: Prisma.ClientFindManyArgs) {
+        return prisma.client.findMany(args);
+    }
+
     async findByUserId(userId: string) {
         return prisma.client.findMany({
             where: { userId },
