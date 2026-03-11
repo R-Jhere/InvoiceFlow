@@ -5,6 +5,8 @@ import { clientService } from '@/services/client.service';
 import { createClientSchema } from '@/validators/client.schema';
 import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
 
+export const runtime = "nodejs";
+
 /**
  * GET /api/clients — List clients for authenticated user
  * POST /api/clients — Create a new client

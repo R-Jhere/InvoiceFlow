@@ -14,7 +14,6 @@ import { ReminderStatus, InvoiceStatus, type Plan } from '@prisma/client';
  */
 
 const DEFAULT_REMINDER_DAYS = [3, 7, 14];
-const DEFAULT_MAX_ATTEMPTS = 5;
 
 export class ReminderService {
     constructor(
@@ -104,7 +103,7 @@ export class ReminderService {
     async processAutoReminders() {
         const overdueInvoices = await this.invoiceRepo.findOverdueForReminders(
             DEFAULT_REMINDER_DAYS,
-            DEFAULT_MAX_ATTEMPTS,
+            DEFAULT_REMINDER_DAYS.length,
         );
 
         const results = { processed: 0, sent: 0, failed: 0 };
@@ -117,12 +116,15 @@ export class ReminderService {
                 (Date.now() - invoice.dueDate.getTime()) / (1000 * 60 * 60 * 24),
             );
 
-            // Only send at configured intervals
-            if (!DEFAULT_REMINDER_DAYS.some((d) => daysOverdue >= d)) continue;
-
-            // Check attempt count
+            // Check how many reminders already sent for this invoice
             const sentCount = await this.reminderRepo.getSentCount(invoice.id);
-            if (sentCount >= DEFAULT_MAX_ATTEMPTS) continue;
+
+            // All scheduled reminders already sent
+            if (sentCount >= DEFAULT_REMINDER_DAYS.length) continue;
+
+            // Only send when we've reached the next reminder day threshold
+            const nextReminderDay = DEFAULT_REMINDER_DAYS[sentCount];
+            if (daysOverdue < nextReminderDay) continue;
 
             try {
                 // Always send email for auto-reminders

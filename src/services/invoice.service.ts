@@ -119,15 +119,7 @@ export class InvoiceService {
             },
         );
 
-        // Update invoice with payment link and status
-        const updatedInvoice = await this.invoiceRepo.update(invoiceId, {
-            status: InvoiceStatus.SENT,
-            paymentLink,
-            paymentProvider: data.paymentProvider,
-            issueDate: new Date(),
-        });
-
-        // Send email to client
+        // Send email FIRST — only update status if email succeeds
         await this.emailSvc.sendInvoiceEmail({
             to: invoice.client.email,
             clientName: invoice.client.name,
@@ -137,6 +129,14 @@ export class InvoiceService {
             dueDate: invoice.dueDate.toLocaleDateString(),
             paymentLink,
             businessName: user.businessName || user.name,
+        });
+
+        // Email sent successfully — now update invoice status
+        const updatedInvoice = await this.invoiceRepo.update(invoiceId, {
+            status: InvoiceStatus.SENT,
+            paymentLink,
+            paymentProvider: data.paymentProvider,
+            issueDate: new Date(),
         });
 
         return updatedInvoice;

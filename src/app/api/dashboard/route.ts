@@ -2,6 +2,8 @@ import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { invoiceService } from '@/services/invoice.service';
 
+export const runtime = "nodejs";
+
 /**
  * GET /api/dashboard — Dashboard stats for authenticated user
  */

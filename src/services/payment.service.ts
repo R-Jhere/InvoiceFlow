@@ -1,6 +1,8 @@
 import { paymentRepository, PaymentRepository } from '@/repositories/payment.repository';
 import { invoiceRepository, InvoiceRepository } from '@/repositories/invoice.repository';
+import { emailService, EmailService } from './email.service';
 import { NotFoundError, AppError } from '@/lib/errors';
+import { config } from '@/config/config';
 import { PaymentProvider, InvoiceStatus } from '@prisma/client';
 import type { MarkAsPaidInput } from '@/validators/payment.schema';
 import Stripe from 'stripe';
@@ -9,7 +11,7 @@ import Razorpay from 'razorpay';
 let stripe: Stripe;
 export const getStripeClient = () => {
     if (!stripe) {
-        stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+        stripe = new Stripe(config.stripe.secretKey, {
             apiVersion: '2025-02-24.acacia' as any,
         });
     }
@@ -20,8 +22,8 @@ let razorpay: Razorpay;
 export const getRazorpayClient = () => {
     if (!razorpay) {
         razorpay = new Razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID!,
-            key_secret: process.env.RAZORPAY_KEY_SECRET!,
+            key_id: config.razorpay.keyId,
+            key_secret: config.razorpay.keySecret,
         });
     }
     return razorpay;
@@ -42,6 +44,7 @@ export class PaymentService {
     constructor(
         private readonly paymentRepo: PaymentRepository,
         private readonly invoiceRepo: InvoiceRepository,
+        private readonly emailSvc: EmailService,
     ) { }
 
     /**
@@ -87,8 +90,8 @@ export class PaymentService {
                         },
                     ],
                     mode: 'payment',
-                    success_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/success`,
-                    cancel_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/pay`,
+                    success_url: `${config.auth.url}/invoices/${invoiceId}/success`,
+                    cancel_url: `${config.auth.url}/invoices/${invoiceId}/pay`,
                     client_reference_id: invoiceId, // Used in webhook
                 });
 
@@ -109,7 +112,7 @@ export class PaymentService {
                     accept_partial: false,
                     description: `Invoice ${params.invoiceNumber}`,
                     reference_id: invoiceId, // Used in webhook
-                    callback_url: `${process.env.NEXTAUTH_URL}/invoices/${invoiceId}/success`,
+                    callback_url: `${config.auth.url}/invoices/${invoiceId}/success`,
                     callback_method: 'get',
                 } as any); // Cast as any because razorpay types are sometimes conflicting
 
@@ -229,12 +232,30 @@ export class PaymentService {
             // If they pay immediately, no more reminders should go out
             reminderEnabled: false,
         });
+
+        // 3. Send payment confirmation email to the freelancer
+        try {
+            if (invoice.user && invoice.client) {
+                await this.emailSvc.sendPaymentConfirmation({
+                    to: invoice.user.email!,
+                    freelancerName: invoice.user.businessName || invoice.user.name,
+                    invoiceNumber: invoice.invoiceNumber,
+                    amount: Number(amount).toFixed(2),
+                    currency,
+                    clientName: invoice.client.name,
+                });
+            }
+        } catch {
+            // Email failure should not revert a successful payment
+            console.error(`Payment confirmation email failed for invoice ${invoiceId}`);
+        }
     }
 }
 
 export const paymentService = new PaymentService(
     paymentRepository,
     invoiceRepository,
+    emailService,
 );
 
 // Re-export webhooks handlers for clean API paths

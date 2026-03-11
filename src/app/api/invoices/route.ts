@@ -6,6 +6,8 @@ import { createInvoiceSchema } from '@/validators/invoice.schema';
 import { InvoiceStatus } from '@prisma/client';
 import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
 
+export const runtime = "nodejs";
+
 /**
  * GET /api/invoices — List invoices for the authenticated user
  * POST /api/invoices — Create a new invoice (DRAFT)

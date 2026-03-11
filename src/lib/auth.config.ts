@@ -1,47 +1,35 @@
-import NextAuth from 'next-auth';
-import Credentials from 'next-auth/providers/credentials';
-import bcrypt from 'bcryptjs';
-import { userRepository } from '@/repositories/user.repository';
+import type { NextAuthConfig } from 'next-auth';
 
 /**
- * NextAuth v5 Configuration
+ * NextAuth v5 Configuration (Edge-compatible)
  *
- * Credentials provider with email/password.
  * JWT session strategy with user id and plan in token.
+ * Providers are dynamically added in auth.ts because of Node.js dependencies.
  */
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-    providers: [
-        Credentials({
-            credentials: {
-                email: { label: 'Email', type: 'email' },
-                password: { label: 'Password', type: 'password' },
-            },
-            async authorize(credentials) {
-                const email = credentials?.email as string | undefined;
-                const password = credentials?.password as string | undefined;
-
-                if (!email || !password) return null;
-
-                const user = await userRepository.findByEmail(email);
-                if (!user) return null;
-
-                const isValid = await bcrypt.compare(password, user.passwordHash);
-                if (!isValid) return null;
-
-                return {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    plan: user.plan,
-                };
-            },
-        }),
-    ],
+export const authConfig = {
+    providers: [],
     session: {
         strategy: 'jwt',
     },
     callbacks: {
+        authorized({ auth, request: { nextUrl } }) {
+            const isLoggedIn = !!auth?.user;
+            const isProtectedRoute = [
+                '/dashboard',
+                '/invoices',
+                '/clients',
+                '/settings'
+            ].some(path => nextUrl.pathname.startsWith(path));
+
+            if (isProtectedRoute) {
+                if (isLoggedIn) return true;
+                return false; // Redirect unauthenticated users to login page
+            } else if (isLoggedIn && (nextUrl.pathname === '/login' || nextUrl.pathname === '/signup' || nextUrl.pathname === '/')) {
+                return Response.redirect(new URL('/dashboard', nextUrl));
+            }
+            return true;
+        },
         async jwt({ token, user }) {
             if (user) {
                 token.id = user.id;
@@ -61,4 +49,4 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         signIn: '/login',
         newUser: '/signup',
     },
-});
+} satisfies NextAuthConfig;
