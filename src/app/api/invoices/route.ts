@@ -4,7 +4,7 @@ import { successResponse, errorResponse } from '@/lib/api-response';
 import { invoiceService } from '@/services/invoice.service';
 import { createInvoiceSchema } from '@/validators/invoice.schema';
 import { InvoiceStatus } from '@prisma/client';
-import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
+import { applyRateLimit, getStandardLimiter, getReadLimiter } from '@/lib/rate-limit';
 
 export const runtime = "nodejs";
 
@@ -16,6 +16,11 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 60 req/min
+        const limited = await applyRateLimit(session.user.id, getReadLimiter());
+        if (limited) return limited;
+
         const { searchParams } = new URL(req.url);
         const statusParam = searchParams.get('status');
         const status = statusParam && Object.values(InvoiceStatus).includes(statusParam as InvoiceStatus)

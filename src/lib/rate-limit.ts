@@ -48,6 +48,19 @@ export function getStandardLimiter(): Ratelimit {
     return _standardLimiter;
 }
 
+let _readLimiter: Ratelimit | null = null;
+/** Read limiter — for authenticated GET routes (60 req/min per user) */
+export function getReadLimiter(): Ratelimit {
+    if (!_readLimiter) {
+        _readLimiter = new Ratelimit({
+            redis: getRedis(),
+            limiter: Ratelimit.slidingWindow(60, '1 m'),
+            prefix: 'ratelimit:read',
+        });
+    }
+    return _readLimiter;
+}
+
 let _webhookLimiter: Ratelimit | null = null;
 /** Webhook limiter — IP-based, higher ceiling for legitimate webhook traffic */
 export function getWebhookLimiter(): Ratelimit {

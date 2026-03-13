@@ -4,6 +4,7 @@ import { emailService, EmailService } from './email.service';
 import { NotFoundError, AppError } from '@/lib/errors';
 import { config } from '@/config/config';
 import { PaymentProvider, InvoiceStatus } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import type { MarkAsPaidInput } from '@/validators/payment.schema';
 import Stripe from 'stripe';
 import Razorpay from 'razorpay';
@@ -196,7 +197,7 @@ export class PaymentService {
     }
 
     /**
-     * Internal: Update invoice status and create payment record.
+     * Internal: Update invoice status and create payment record (atomic).
      */
     private async processPaymentSuccess(
         invoiceId: string,
@@ -215,25 +216,34 @@ export class PaymentService {
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) return;
 
-        // 1. Create payment record
-        await this.paymentRepo.create({
-            invoiceId,
-            provider,
-            providerPaymentId,
-            amount: amount as any,
-            currency,
-            paidAt,
-        });
+        // Atomically create payment record and update invoice status.
+        // If either operation fails the entire transaction is rolled back,
+        // keeping the database consistent and allowing webhook retries to
+        // re-process the event correctly.
+        await prisma.$transaction([
+            prisma.payment.create({
+                data: {
+                    invoiceId,
+                    provider,
+                    providerPaymentId,
+                    amount: amount as any,
+                    currency,
+                    paidAt,
+                },
+            }),
+            prisma.invoice.update({
+                where: { id: invoiceId },
+                data: {
+                    status: InvoiceStatus.PAID,
+                    paidAt,
+                    // If they pay, no more reminders should go out
+                    reminderEnabled: false,
+                },
+            }),
+        ]);
 
-        // 2. Update invoice status
-        await this.invoiceRepo.update(invoiceId, {
-            status: InvoiceStatus.PAID,
-            paidAt,
-            // If they pay immediately, no more reminders should go out
-            reminderEnabled: false,
-        });
-
-        // 3. Send payment confirmation email to the freelancer
+        // Send payment confirmation email to the freelancer.
+        // Email failure must not revert a successfully recorded payment.
         try {
             if (invoice.user && invoice.client) {
                 await this.emailSvc.sendPaymentConfirmation({
