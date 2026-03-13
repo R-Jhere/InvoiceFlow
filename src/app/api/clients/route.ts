@@ -3,7 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { clientService } from '@/services/client.service';
 import { createClientSchema } from '@/validators/client.schema';
-import { applyRateLimit, getStandardLimiter } from '@/lib/rate-limit';
+import { applyRateLimit, getStandardLimiter, getReadLimiter } from '@/lib/rate-limit';
 
 export const runtime = "nodejs";
 
@@ -15,6 +15,11 @@ export const runtime = "nodejs";
 export async function GET() {
     try {
         const session = await requireAuth();
+
+        // Rate limit: 60 req/min
+        const limited = await applyRateLimit(session.user.id, getReadLimiter());
+        if (limited) return limited;
+
         const clients = await clientService.getClients(session.user.id);
         return successResponse(clients);
     } catch (error) {

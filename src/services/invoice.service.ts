@@ -1,6 +1,6 @@
 import { invoiceRepository, InvoiceRepository } from '@/repositories/invoice.repository';
 import { userRepository, UserRepository } from '@/repositories/user.repository';
-import { NotFoundError, ForbiddenError } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { checkInvoiceLimit } from '@/lib/plan-limits';
 import { paymentService, PaymentService } from './payment.service';
 import { emailService, EmailService } from './email.service';
@@ -52,20 +52,33 @@ export class InvoiceService {
         // Auto-generate invoice number
         const invoiceNumber = await this.invoiceRepo.getNextInvoiceNumber(userId);
 
-        return this.invoiceRepo.create({
-            userId,
-            clientId: data.clientId,
-            invoiceNumber,
-            items: data.items,
-            subtotal: data.subtotal,
-            tax: data.tax,
-            total: data.total,
-            currency: data.currency,
-            dueDate: new Date(data.dueDate),
-            reminderEnabled: data.reminderEnabled,
-            status: InvoiceStatus.DRAFT,
-        });
-    }
+        try {
+            return await this.invoiceRepo.create({
+                userId,
+                clientId: data.clientId,
+                invoiceNumber,
+                items: data.items,
+                subtotal: data.subtotal,
+                tax: data.tax,
+                total: data.total,
+                currency: data.currency,
+                dueDate: new Date(data.dueDate),
+                reminderEnabled: data.reminderEnabled,
+                status: InvoiceStatus.DRAFT,
+            });
+        } catch (error) {
+            // Handle race condition: two concurrent requests may generate the
+            // same invoice number before either has been persisted.
+            // Prisma unique constraint violation code = P2002.
+            if (
+                error instanceof Error &&
+                'code' in error &&
+                (error as { code: string }).code === 'P2002'
+            ) {
+                throw new ConflictError('Invoice number conflict — please retry');
+            }
+            throw error;
+        }    }
 
     async updateInvoice(userId: string, invoiceId: string, data: UpdateInvoiceInput) {
         const invoice = await this.getInvoiceById(userId, invoiceId);
