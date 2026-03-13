@@ -15,10 +15,14 @@ function verifyRazorpaySignature(body: string, signature: string, secret: string
         .createHmac('sha256', secret)
         .update(body)
         .digest('hex');
-    return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSignature),
-    );
+
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+
+    // timingSafeEqual throws if buffer lengths differ — reject early
+    if (sigBuf.length !== expectedBuf.length) return false;
+
+    return crypto.timingSafeEqual(sigBuf, expectedBuf);
 }
 
 export async function POST(req: NextRequest) {

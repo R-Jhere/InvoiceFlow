@@ -1,12 +1,12 @@
 import { invoiceRepository, InvoiceRepository } from '@/repositories/invoice.repository';
 import { userRepository, UserRepository } from '@/repositories/user.repository';
-import { NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '@/lib/errors';
 import { checkInvoiceLimit } from '@/lib/plan-limits';
 import { paymentService, PaymentService } from './payment.service';
 import { emailService, EmailService } from './email.service';
 import { InvoiceStatus } from '@prisma/client';
 import type { CreateInvoiceInput, UpdateInvoiceInput, SendInvoiceInput } from '@/validators/invoice.schema';
-import type { DashboardStats } from '@/types';
+import type { DashboardStats, InvoiceItem } from '@/types';
 
 /**
  * Invoice Service
@@ -34,11 +34,30 @@ export class InvoiceService {
         return invoice;
     }
 
-    /** Get invoice by ID without auth check (for public pay page) */
+    /**
+     * Get invoice by ID without auth check (for public pay page).
+     *
+     * Only returns the fields the payer needs — never leak sensitive
+     * user data (email, passwordHash, plan, stripeCustomerId, etc.).
+     */
     async getPublicInvoice(invoiceId: string) {
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) throw new NotFoundError('Invoice');
-        return invoice;
+        return {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            items: invoice.items,
+            subtotal: invoice.subtotal,
+            tax: invoice.tax,
+            total: invoice.total,
+            currency: invoice.currency,
+            status: invoice.status,
+            issueDate: invoice.issueDate,
+            dueDate: invoice.dueDate,
+            paymentLink: invoice.paymentLink,
+            clientName: invoice.client?.name,
+            businessName: invoice.user?.businessName || invoice.user?.name,
+        };
     }
 
     async createInvoice(userId: string, data: CreateInvoiceInput) {
@@ -48,6 +67,29 @@ export class InvoiceService {
 
         const monthlyCount = await this.userRepo.getMonthlyInvoiceCount(userId);
         checkInvoiceLimit(user.plan, monthlyCount);
+
+        // Server-side total verification — never trust client-computed totals.
+        // Recalculate from the authoritative line-item data.
+        for (const item of data.items) {
+            const expectedAmount = item.qty * item.rate;
+            if (Math.abs(expectedAmount - item.amount) > 0.01) {
+                throw new ValidationError('Line item amount does not match qty × rate');
+            }
+        }
+
+        const computedSubtotal = data.items.reduce((sum, item) => sum + item.amount, 0);
+        const computedTotal = computedSubtotal + (computedSubtotal * data.tax) / 100;
+
+        // Allow rounding tolerance of 1 cent.
+        // This tolerance is suitable for currencies with 2-decimal subdivisions
+        // (USD, EUR, GBP, etc.). For zero-decimal currencies like JPY, the
+        // tolerance is effectively < 1 unit, which is still correct.
+        if (Math.abs(computedSubtotal - data.subtotal) > 0.01) {
+            throw new ValidationError('Subtotal does not match line items');
+        }
+        if (Math.abs(computedTotal - data.total) > 0.01) {
+            throw new ValidationError('Total does not match subtotal + tax');
+        }
 
         // Auto-generate invoice number
         const invoiceNumber = await this.invoiceRepo.getNextInvoiceNumber(userId);
@@ -86,6 +128,25 @@ export class InvoiceService {
         // Only drafts can be edited
         if (invoice.status !== InvoiceStatus.DRAFT) {
             throw new ForbiddenError('Only draft invoices can be edited');
+        }
+
+        // If items or totals are being updated, re-verify server-side.
+        // Use the incoming values or fall back to the existing invoice values.
+        if (data.items || data.subtotal !== undefined || data.tax !== undefined || data.total !== undefined) {
+            const items: InvoiceItem[] = data.items || (invoice.items as InvoiceItem[]);
+            const subtotal = data.subtotal ?? Number(invoice.subtotal);
+            const tax = data.tax ?? Number(invoice.tax);
+            const total = data.total ?? Number(invoice.total);
+
+            const computedSubtotal = items.reduce((sum, item) => sum + item.amount, 0);
+            const computedTotal = computedSubtotal + (computedSubtotal * tax) / 100;
+
+            if (Math.abs(computedSubtotal - subtotal) > 0.01) {
+                throw new ValidationError('Subtotal does not match line items');
+            }
+            if (Math.abs(computedTotal - total) > 0.01) {
+                throw new ValidationError('Total does not match subtotal + tax');
+            }
         }
 
         return this.invoiceRepo.update(invoiceId, {

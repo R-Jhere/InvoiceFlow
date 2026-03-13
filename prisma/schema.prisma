@@ -124,6 +124,7 @@ model Payment {
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
+  @@unique([providerPaymentId], map: "payments_provider_payment_id_key")
   @@index([invoiceId])
   @@index([providerPaymentId])
   @@map("payments")
