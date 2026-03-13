@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
         // Check for existing user
         const existing = await userRepository.findByEmail(data.email);
         if (existing) {
-            throw new ConflictError('An account with this email already exists');
+            throw new ConflictError('Unable to create account. Please try a different email or log in.');
         }
 
         // Hash password

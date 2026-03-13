@@ -70,6 +70,13 @@ export class InvoiceService {
 
         // Server-side total verification — never trust client-computed totals.
         // Recalculate from the authoritative line-item data.
+        for (const item of data.items) {
+            const expectedAmount = item.qty * item.rate;
+            if (Math.abs(expectedAmount - item.amount) > 0.01) {
+                throw new ValidationError('Line item amount does not match qty × rate');
+            }
+        }
+
         const computedSubtotal = data.items.reduce((sum, item) => sum + item.amount, 0);
         const computedTotal = computedSubtotal + (computedSubtotal * data.tax) / 100;
 
@@ -121,6 +128,25 @@ export class InvoiceService {
         // Only drafts can be edited
         if (invoice.status !== InvoiceStatus.DRAFT) {
             throw new ForbiddenError('Only draft invoices can be edited');
+        }
+
+        // If items or totals are being updated, re-verify server-side.
+        // Use the incoming values or fall back to the existing invoice values.
+        if (data.items || data.subtotal !== undefined || data.tax !== undefined || data.total !== undefined) {
+            const items = data.items || (invoice.items as { amount: number }[]);
+            const subtotal = data.subtotal ?? Number(invoice.subtotal);
+            const tax = data.tax ?? Number(invoice.tax);
+            const total = data.total ?? Number(invoice.total);
+
+            const computedSubtotal = items.reduce((sum, item) => sum + item.amount, 0);
+            const computedTotal = computedSubtotal + (computedSubtotal * tax) / 100;
+
+            if (Math.abs(computedSubtotal - subtotal) > 0.01) {
+                throw new ValidationError('Subtotal does not match line items');
+            }
+            if (Math.abs(computedTotal - total) > 0.01) {
+                throw new ValidationError('Total does not match subtotal + tax');
+            }
         }
 
         return this.invoiceRepo.update(invoiceId, {

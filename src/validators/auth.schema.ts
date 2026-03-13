@@ -23,13 +23,13 @@ const passwordSchema = z
 
 export const signupSchema = z.object({
     name: z.string().min(1, 'Name is required').max(200),
-    email: z.string().email('Invalid email address'),
+    email: z.string().email('Invalid email address').transform(v => v.toLowerCase()),
     password: passwordSchema,
     businessName: z.string().max(200).optional(),
 });
 
 export const loginSchema = z.object({
-    email: z.string().email('Invalid email address'),
+    email: z.string().email('Invalid email address').transform(v => v.toLowerCase()),
     password: z.string().min(1, 'Password is required'),
 });
 
