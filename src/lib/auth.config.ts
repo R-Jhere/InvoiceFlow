@@ -11,6 +11,17 @@ export const authConfig = {
     providers: [],
     session: {
         strategy: 'jwt',
+        maxAge: 24 * 60 * 60, // 24 hours — force re-auth daily
+    },
+    cookies: {
+        sessionToken: {
+            options: {
+                httpOnly: true,
+                sameSite: 'lax' as const,
+                path: '/',
+                secure: process.env.NODE_ENV === 'production',
+            },
+        },
     },
     callbacks: {
         authorized({ auth, request: { nextUrl } }) {

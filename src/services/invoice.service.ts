@@ -1,6 +1,6 @@
 import { invoiceRepository, InvoiceRepository } from '@/repositories/invoice.repository';
 import { userRepository, UserRepository } from '@/repositories/user.repository';
-import { NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '@/lib/errors';
 import { checkInvoiceLimit } from '@/lib/plan-limits';
 import { paymentService, PaymentService } from './payment.service';
 import { emailService, EmailService } from './email.service';
@@ -34,11 +34,30 @@ export class InvoiceService {
         return invoice;
     }
 
-    /** Get invoice by ID without auth check (for public pay page) */
+    /**
+     * Get invoice by ID without auth check (for public pay page).
+     *
+     * Only returns the fields the payer needs — never leak sensitive
+     * user data (email, passwordHash, plan, stripeCustomerId, etc.).
+     */
     async getPublicInvoice(invoiceId: string) {
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) throw new NotFoundError('Invoice');
-        return invoice;
+        return {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            items: invoice.items,
+            subtotal: invoice.subtotal,
+            tax: invoice.tax,
+            total: invoice.total,
+            currency: invoice.currency,
+            status: invoice.status,
+            issueDate: invoice.issueDate,
+            dueDate: invoice.dueDate,
+            paymentLink: invoice.paymentLink,
+            clientName: invoice.client?.name,
+            businessName: invoice.user?.businessName || invoice.user?.name,
+        };
     }
 
     async createInvoice(userId: string, data: CreateInvoiceInput) {
@@ -48,6 +67,19 @@ export class InvoiceService {
 
         const monthlyCount = await this.userRepo.getMonthlyInvoiceCount(userId);
         checkInvoiceLimit(user.plan, monthlyCount);
+
+        // Server-side total verification — never trust client-computed totals.
+        // Recalculate from the authoritative line-item data.
+        const computedSubtotal = data.items.reduce((sum, item) => sum + item.amount, 0);
+        const computedTotal = computedSubtotal + (computedSubtotal * data.tax) / 100;
+
+        // Allow rounding tolerance of 1 cent
+        if (Math.abs(computedSubtotal - data.subtotal) > 0.01) {
+            throw new ValidationError('Subtotal does not match line items');
+        }
+        if (Math.abs(computedTotal - data.total) > 0.01) {
+            throw new ValidationError('Total does not match subtotal + tax');
+        }
 
         // Auto-generate invoice number
         const invoiceNumber = await this.invoiceRepo.getNextInvoiceNumber(userId);

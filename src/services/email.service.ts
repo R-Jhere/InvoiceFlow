@@ -8,6 +8,20 @@ import { config } from '@/config/config';
  * Used by invoice and reminder services.
  */
 
+/**
+ * Escape HTML special characters to prevent XSS in email templates.
+ * User-supplied values (names, invoice numbers, etc.) MUST be escaped
+ * before interpolation into HTML strings.
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let _resend: Resend | null = null;
 function getResend(): Resend {
   if (!_resend) _resend = new Resend(config.email.resendApiKey);
@@ -46,11 +60,18 @@ export class EmailService {
     paymentLink: string;
     businessName: string;
   }) {
-    const { to, clientName, invoiceNumber, amount, currency, dueDate, paymentLink, businessName } = params;
+    const to = params.to;
+    const clientName = escapeHtml(params.clientName);
+    const invoiceNumber = escapeHtml(params.invoiceNumber);
+    const amount = escapeHtml(params.amount);
+    const currency = escapeHtml(params.currency);
+    const dueDate = escapeHtml(params.dueDate);
+    const paymentLink = encodeURI(params.paymentLink);
+    const businessName = escapeHtml(params.businessName);
 
     return this.sendEmail({
       to,
-      subject: `Invoice ${invoiceNumber} from ${businessName}`,
+      subject: `Invoice ${params.invoiceNumber} from ${params.businessName}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #1a1a1a;">New Invoice from ${businessName}</h2>
@@ -77,11 +98,17 @@ export class EmailService {
     paymentLink: string;
     businessName: string;
   }) {
-    const { to, clientName, invoiceNumber, amount, currency, paymentLink, businessName } = params;
+    const to = params.to;
+    const clientName = escapeHtml(params.clientName);
+    const invoiceNumber = escapeHtml(params.invoiceNumber);
+    const amount = escapeHtml(params.amount);
+    const currency = escapeHtml(params.currency);
+    const paymentLink = encodeURI(params.paymentLink);
+    const businessName = escapeHtml(params.businessName);
 
     return this.sendEmail({
       to,
-      subject: `Reminder: Invoice ${invoiceNumber} is overdue`,
+      subject: `Reminder: Invoice ${params.invoiceNumber} is overdue`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #1a1a1a;">Payment Reminder</h2>
@@ -102,14 +129,19 @@ export class EmailService {
     currency: string;
     clientName: string;
   }) {
-    const { to, freelancerName, invoiceNumber, amount, currency, clientName } = params;
+    const to = params.to;
+    const freelancerName = escapeHtml(params.freelancerName);
+    const invoiceNumber = escapeHtml(params.invoiceNumber);
+    const amount = escapeHtml(params.amount);
+    const currency = escapeHtml(params.currency);
+    const clientName = escapeHtml(params.clientName);
 
     return this.sendEmail({
       to,
-      subject: `Payment received for Invoice ${invoiceNumber}`,
+      subject: `Payment received for Invoice ${params.invoiceNumber}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #22c55e;">✅ Payment Received!</h2>
+          <h2 style="color: #22c55e;">&#x2705; Payment Received!</h2>
           <p>Hi ${freelancerName},</p>
           <p><strong>${clientName}</strong> has paid invoice <strong>${invoiceNumber}</strong> — <strong>${currency} ${amount}</strong>.</p>
           <p style="margin-top: 24px; color: #666; font-size: 14px;">This payment has been recorded in your InvoiceFlow dashboard.</p>

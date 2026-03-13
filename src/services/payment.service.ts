@@ -9,6 +9,9 @@ import type { MarkAsPaidInput } from '@/validators/payment.schema';
 import Stripe from 'stripe';
 import Razorpay from 'razorpay';
 
+/** UUID v4 format check — rejects obviously forged reference IDs from webhooks */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 let stripe: Stripe;
 export const getStripeClient = () => {
     if (!stripe) {
@@ -140,7 +143,7 @@ export class PaymentService {
             const invoiceId = session.client_reference_id;
             const providerPaymentId = session.payment_intent as string;
 
-            if (!invoiceId) return; // Ignore if missing our reference
+            if (!invoiceId || !UUID_RE.test(invoiceId)) return; // Ignore if missing or invalid reference
 
             await this.processPaymentSuccess(
                 invoiceId,
@@ -159,7 +162,7 @@ export class PaymentService {
             const invoiceId = link.reference_id;
             const providerPaymentId = payload.payload.payment.entity.id;
 
-            if (!invoiceId) return;
+            if (!invoiceId || !UUID_RE.test(invoiceId)) return;
 
             await this.processPaymentSuccess(
                 invoiceId,
