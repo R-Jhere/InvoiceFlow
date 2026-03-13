@@ -73,7 +73,10 @@ export class InvoiceService {
         const computedSubtotal = data.items.reduce((sum, item) => sum + item.amount, 0);
         const computedTotal = computedSubtotal + (computedSubtotal * data.tax) / 100;
 
-        // Allow rounding tolerance of 1 cent
+        // Allow rounding tolerance of 1 cent.
+        // This tolerance is suitable for currencies with 2-decimal subdivisions
+        // (USD, EUR, GBP, etc.). For zero-decimal currencies like JPY, the
+        // tolerance is effectively < 1 unit, which is still correct.
         if (Math.abs(computedSubtotal - data.subtotal) > 0.01) {
             throw new ValidationError('Subtotal does not match line items');
         }

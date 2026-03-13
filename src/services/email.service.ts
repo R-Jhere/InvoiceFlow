@@ -66,7 +66,7 @@ export class EmailService {
     const amount = escapeHtml(params.amount);
     const currency = escapeHtml(params.currency);
     const dueDate = escapeHtml(params.dueDate);
-    const paymentLink = encodeURI(params.paymentLink);
+    const paymentLink = escapeHtml(params.paymentLink);
     const businessName = escapeHtml(params.businessName);
 
     return this.sendEmail({
@@ -103,7 +103,7 @@ export class EmailService {
     const invoiceNumber = escapeHtml(params.invoiceNumber);
     const amount = escapeHtml(params.amount);
     const currency = escapeHtml(params.currency);
-    const paymentLink = encodeURI(params.paymentLink);
+    const paymentLink = escapeHtml(params.paymentLink);
     const businessName = escapeHtml(params.businessName);
 
     return this.sendEmail({

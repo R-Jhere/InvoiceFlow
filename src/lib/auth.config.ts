@@ -17,6 +17,9 @@ export const authConfig = {
         sessionToken: {
             options: {
                 httpOnly: true,
+                // 'lax' is intentional: users click payment links in emails
+                // which are cross-site top-level navigations. 'strict' would
+                // require them to re-authenticate on every email link click.
                 sameSite: 'lax' as const,
                 path: '/',
                 secure: process.env.NODE_ENV === 'production',
