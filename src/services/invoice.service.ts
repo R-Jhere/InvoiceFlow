@@ -6,7 +6,7 @@ import { paymentService, PaymentService } from './payment.service';
 import { emailService, EmailService } from './email.service';
 import { InvoiceStatus } from '@prisma/client';
 import type { CreateInvoiceInput, UpdateInvoiceInput, SendInvoiceInput } from '@/validators/invoice.schema';
-import type { DashboardStats } from '@/types';
+import type { DashboardStats, InvoiceItem } from '@/types';
 
 /**
  * Invoice Service
@@ -133,7 +133,7 @@ export class InvoiceService {
         // If items or totals are being updated, re-verify server-side.
         // Use the incoming values or fall back to the existing invoice values.
         if (data.items || data.subtotal !== undefined || data.tax !== undefined || data.total !== undefined) {
-            const items = data.items || (invoice.items as { amount: number }[]);
+            const items: InvoiceItem[] = data.items || (invoice.items as InvoiceItem[]);
             const subtotal = data.subtotal ?? Number(invoice.subtotal);
             const tax = data.tax ?? Number(invoice.tax);
             const total = data.total ?? Number(invoice.total);
